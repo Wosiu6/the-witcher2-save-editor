@@ -1,7 +1,36 @@
 ﻿@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Witcher 2 Save Editor</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>The Witcher 2 Save Editor</h1>
 
-Welcome to your new app.
+<p class="lead">
+    A multiplatform save game editor for The Witcher 2: Assassins of Kings.
+</p>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <h5 class="card-title">Getting Started</h5>
+        <p class="card-text">
+            Navigate to the <a href="editor">Editor</a> page to upload and edit your Witcher 2 save files (.sav).
+        </p>
+        <h6>Features:</h6>
+        <ul>
+            <li>Load and parse <code>.sav</code> files (DZIP/LZF compressed format)</li>
+            <li>Browse all save data sections (quests, facts, world state, etc.)</li>
+            <li>Edit values (integers, floats, booleans, strings)</li>
+            <li>Export modified save files</li>
+            <li>View the full save data tree structure</li>
+        </ul>
+        <h6>Save File Sections:</h6>
+        <ul>
+            <li><strong>saveInfo</strong> &ndash; Save metadata, difficulty, save message</li>
+            <li><strong>questSystem</strong> &ndash; Active quests and quest states</li>
+            <li><strong>questLogBlock</strong> &ndash; Quest log progress</li>
+            <li><strong>facts</strong> &ndash; World facts and story flags</li>
+            <li><strong>worldInfo</strong> &ndash; Current world/location data</li>
+            <li><strong>dynamicEntities</strong> &ndash; NPCs, items, entities in the world</li>
+            <li><strong>playerSpawn</strong> &ndash; Player position and spawn info</li>
+        </ul>
+    </div>
+</div>

@@ -1,0 +1,197 @@
+@page "/editor"
+@rendermode InteractiveServer
+@inject SaveFileService SaveService
+@inject IJSRuntime JS
+
+<PageTitle>Editor - Witcher 2 Save Editor</PageTitle>
+
+<h1>Save File Editor</h1>
+
+@if (!SaveService.IsLoaded)
+{
+    <div class="mt-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Load Save File</h5>
+                <p>Select a Witcher 2 save file (.sav) to edit:</p>
+                <InputFile OnChange="HandleFileUpload" accept=".sav" class="form-control" />
+                @if (isLoading)
+                {
+                    <div class="mt-2">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Loading...</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+        <div>
+            <span class="badge bg-success me-2">Loaded</span>
+            <strong>@SaveService.CurrentFileName</strong>
+            <span class="text-muted ms-2">
+                (@SaveService.CurrentSave!.Sections.Count sections,
+                @FormatBytes(SaveService.CurrentSave.RawDecompressedData.Length) decompressed)
+            </span>
+        </div>
+        <div>
+            <button class="btn btn-primary btn-sm me-2" @onclick="ExportSave">
+                ⬇ Export Modified Save
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CloseSave">
+                ✕ Close
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <div class="alert @statusClass alert-dismissible fade show" role="alert">
+            @statusMessage
+            <button type="button" class="btn-close" @onclick="() => statusMessage = null"></button>
+        </div>
+    }
+
+    <div class="row">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header"><strong>Sections</strong></div>
+                <div class="list-group list-group-flush" style="max-height: 70vh; overflow-y: auto;">
+                    @foreach (var section in SaveService.CurrentSave!.Sections)
+                    {
+                        <button class="list-group-item list-group-item-action @(selectedSection == section ? "active" : "")"
+                                @onclick="() => SelectSection(section)">
+                            @section.Name
+                            <span class="badge bg-secondary float-end">@CountNodes(section)</span>
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-md-9">
+            @if (selectedSection != null)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <strong>@selectedSection.Name</strong>
+                        <span class="text-muted ms-2">(offset: @selectedSection.Offset)</span>
+                    </div>
+                    <div class="card-body" style="max-height: 70vh; overflow-y: auto;">
+                        @if (selectedSection.RootNode != null)
+                        {
+                            <RenderNode Node="selectedSection.RootNode"
+                                        SectionName="@selectedSection.Name"
+                                        OnEdit="HandleEdit" />
+                        }
+                        else
+                        {
+                            <p class="text-muted">Unable to parse this section's data structure.</p>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body text-center text-muted py-5">
+                        <p>Select a section from the left to view and edit its contents.</p>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(SaveService.ErrorMessage))
+{
+    <div class="alert alert-danger mt-3">@SaveService.ErrorMessage</div>
+}
+
+@code {
+    private bool isLoading;
+    private SaveSection? selectedSection;
+    private string? statusMessage;
+    private string statusClass = "alert-info";
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            await SaveService.LoadFromStream(stream, file.Name);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void SelectSection(SaveSection section)
+    {
+        selectedSection = section;
+    }
+
+    private void HandleEdit((string sectionName, string path, string newValue) edit)
+    {
+        var success = SaveService.ApplyEdit(edit.sectionName, edit.path, edit.newValue);
+        if (success)
+        {
+            statusMessage = $"Successfully updated {edit.path}";
+            statusClass = "alert-success";
+        }
+        else
+        {
+            statusMessage = $"Failed to update {edit.path}. Only same-size value replacements are supported.";
+            statusClass = "alert-warning";
+        }
+        StateHasChanged();
+    }
+
+    private async Task ExportSave()
+    {
+        var bytes = SaveService.Export();
+        if (bytes != null)
+        {
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = SaveService.CurrentFileName ?? "modified.sav";
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+            statusMessage = $"Exported {fileName} ({FormatBytes(bytes.Length)})";
+            statusClass = "alert-success";
+        }
+        else
+        {
+            statusMessage = "Export failed.";
+            statusClass = "alert-danger";
+        }
+    }
+
+    private void CloseSave()
+    {
+        selectedSection = null;
+        statusMessage = null;
+        SaveService.Close();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    private static string CountNodes(SaveSection section)
+    {
+        if (section.RootNode == null) return "?";
+        int count = 0;
+        void Walk(SaveNode n) { count++; foreach (var c in n.Children) Walk(c); }
+        Walk(section.RootNode);
+        return count.ToString();
+    }
+}

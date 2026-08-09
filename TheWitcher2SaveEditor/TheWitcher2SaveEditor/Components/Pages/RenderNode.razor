@@ -1,0 +1,131 @@
+@using TheWitcher2SaveEditor.Models
+
+@if (Node.NodeType == "AVAL" && Node.Value != null)
+{
+    <div class="d-flex align-items-center py-1 border-bottom">
+        <span class="badge bg-secondary me-2 font-monospace small">@Node.Value.TypeName</span>
+        <strong class="me-2 small">@Node.Name</strong>
+        @if (IsEditable(Node.Value.TypeName))
+        {
+            @if (isEditing)
+            {
+                <div class="input-group input-group-sm" style="max-width: 250px;">
+                    <input type="text" class="form-control form-control-sm" @bind="editValue"
+                           @bind:event="oninput" @onkeydown="HandleKeyDown" />
+                    <button class="btn btn-success btn-sm" @onclick="ConfirmEdit">✓</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">✕</button>
+                </div>
+            }
+            else
+            {
+                <span class="font-monospace text-primary me-2 small">@Node.Value.DisplayValue</span>
+                <button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:0.7rem"
+                        @onclick="StartEdit" title="Edit">✏</button>
+            }
+        }
+        else
+        {
+            <span class="font-monospace text-muted small">
+                @if (Node.Value.Value != null)
+                {
+                    @Node.Value.DisplayValue
+                }
+                else
+                {
+                    <span>[@Node.Value.RawBytes.Length bytes]</span>
+                }
+            </span>
+        }
+    </div>
+}
+else if (Node.NodeType == "BLCK")
+{
+    <div class="py-1">
+        <div class="d-flex align-items-center" style="cursor:pointer" @onclick="Toggle">
+            <span class="me-1">@(isExpanded ? "▼" : "▶")</span>
+            <span class="badge bg-info me-1 small">BLCK</span>
+            <strong class="small">@Node.Name</strong>
+            <span class="text-muted ms-1 small">(@Node.Children.Count)</span>
+        </div>
+        @if (isExpanded)
+        {
+            <div class="ms-3 border-start ps-2">
+                @foreach (var child in Node.Children.Take(visibleCount))
+                {
+                    <RenderNode Node="child" SectionName="@SectionName" OnEdit="OnEdit" />
+                }
+                @if (Node.Children.Count > visibleCount)
+                {
+                    <button class="btn btn-link btn-sm p-0" @onclick="ShowMore">
+                        Show more (@(Node.Children.Count - visibleCount) remaining)...
+                    </button>
+                }
+            </div>
+        }
+    </div>
+}
+else if (Node.NodeType == "ROTS")
+{
+    <div class="py-1 text-muted border-bottom small">
+        <span class="badge bg-dark me-1">ROTS</span>
+        @(Node.RawData != null ? BitConverter.ToString(Node.RawData) : "")
+    </div>
+}
+else if (Node.NodeType == "KCUP")
+{
+    <div class="py-1">
+        <div class="d-flex align-items-center" style="cursor:pointer" @onclick="Toggle">
+            <span class="me-1">@(isExpanded ? "▼" : "▶")</span>
+            <span class="badge bg-warning text-dark me-1 small">KCUP</span>
+            <strong class="small">@Node.Name</strong>
+        </div>
+        @if (isExpanded)
+        {
+            <div class="ms-3 border-start ps-2">
+                @foreach (var child in Node.Children)
+                {
+                    <RenderNode Node="child" SectionName="@SectionName" OnEdit="OnEdit" />
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public required SaveNode Node { get; set; }
+    [Parameter] public string SectionName { get; set; } = "";
+    [Parameter] public EventCallback<(string sectionName, string path, string newValue)> OnEdit { get; set; }
+
+    private bool isExpanded;
+    private bool isEditing;
+    private string editValue = "";
+    private int visibleCount = 50;
+
+    private static bool IsEditable(string typeName) =>
+        typeName is "Bool" or "Int" or "Uint" or "Int8" or "Uint8" or "Int16" or "Uint16"
+            or "Int64" or "Uint64" or "Float";
+
+    private void Toggle() => isExpanded = !isExpanded;
+
+    private void ShowMore() => visibleCount += 100;
+
+    private void StartEdit()
+    {
+        editValue = Node.Value?.DisplayValue ?? "";
+        isEditing = true;
+    }
+
+    private async Task ConfirmEdit()
+    {
+        await OnEdit.InvokeAsync((SectionName, Node.Name, editValue));
+        isEditing = false;
+    }
+
+    private void CancelEdit() => isEditing = false;
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ConfirmEdit();
+        if (e.Key == "Escape") CancelEdit();
+    }
+}
