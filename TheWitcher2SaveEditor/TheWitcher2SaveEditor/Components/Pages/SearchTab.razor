@@ -1,0 +1,236 @@
+@using TheWitcher2SaveEditor.Models
+
+<h5>🔍 Search All Values</h5>
+<p class="text-muted small">Search across all sections for any node by name or value. Useful for finding specific game variables.</p>
+
+<div class="input-group mb-3">
+    <input type="text" class="form-control" placeholder="Search for node names (e.g. 'gold', 'orens', 'health', 'level')..."
+           @bind="searchQuery" @bind:event="oninput" @onkeydown="HandleKey" />
+    <button class="btn btn-primary" @onclick="DoSearch">Search</button>
+</div>
+
+@if (isSearching)
+{
+    <div class="spinner-border spinner-border-sm" role="status"></div>
+    <span class="ms-2">Searching...</span>
+}
+
+@if (results.Count > 0)
+{
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>Section</th>
+                <th>Path</th>
+                <th>Type</th>
+                <th>Value</th>
+                <th>Edit</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in results.Take(200))
+            {
+                <tr>
+                    <td><span class="badge bg-info">@r.Section</span></td>
+                    <td><code class="small">@r.Path</code></td>
+                    <td><span class="badge bg-secondary">@r.TypeName</span></td>
+                    <td>
+                        @if (editingResult == r)
+                        {
+                            <div class="input-group input-group-sm" style="max-width:200px">
+                                <input type="text" class="form-control" @bind="editValue" @onkeydown="HandleEditKey" />
+                                <button class="btn btn-success btn-sm" @onclick="SaveEdit">✓</button>
+                                <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="font-monospace small">@r.DisplayValue</span>
+                        }
+                    </td>
+                    <td>
+                        @if (r.IsEditable && editingResult != r)
+                        {
+                            <button class="btn btn-outline-primary btn-sm py-0 px-1" @onclick="() => StartEdit(r)">✏</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (results.Count > 200)
+    {
+        <p class="text-muted">Showing 200 of @results.Count results. Refine your search.</p>
+    }
+}
+else if (hasSearched)
+{
+    <div class="alert alert-secondary">No results found for "@searchQuery".</div>
+}
+
+@code {
+    [Parameter] public required W2SaveFile Save { get; set; }
+    [Parameter] public EventCallback<(string message, bool success)> OnStatusMessage { get; set; }
+
+    private string searchQuery = "";
+    private List<SearchResult> results = [];
+    private bool isSearching;
+    private bool hasSearched;
+    private SearchResult? editingResult;
+    private string editValue = "";
+
+    private void DoSearch()
+    {
+        if (string.IsNullOrWhiteSpace(searchQuery)) return;
+
+        isSearching = true;
+        results.Clear();
+        hasSearched = true;
+
+        var query = searchQuery.ToLower();
+
+        foreach (var section in Save.Sections.Where(s => s.RootNode != null))
+        {
+            // Skip extremely large sections for performance
+            if (section.Name == "worldLayerGroups") continue;
+
+            SearchNode(section.RootNode!, section.Name, "", query);
+
+            if (results.Count >= 500) break;
+        }
+
+        isSearching = false;
+    }
+
+    private void SearchNode(SaveNode node, string sectionName, string path, string query)
+    {
+        if (results.Count >= 500) return;
+
+        var currentPath = string.IsNullOrEmpty(path) ? node.Name : $"{path}/{node.Name}";
+
+        if (node.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            (node.Value?.DisplayValue?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            if (node.Value != null)
+            {
+                results.Add(new SearchResult
+                {
+                    Section = sectionName,
+                    Path = currentPath,
+                    TypeName = node.Value.TypeName,
+                    DisplayValue = node.Value.DisplayValue,
+                    IsEditable = IsEditable(node.Value.TypeName),
+                    Node = node,
+                    SaveSection = Save.Sections.First(s => s.Name == sectionName)
+                });
+            }
+        }
+
+        foreach (var child in node.Children)
+        {
+            SearchNode(child, sectionName, currentPath, query);
+        }
+    }
+
+    private void StartEdit(SearchResult r)
+    {
+        editingResult = r;
+        editValue = r.DisplayValue;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (editingResult?.Node?.Value == null) return;
+
+        var oldBytes = editingResult.Node.Value.RawBytes;
+        var newBytes = ConvertToBytes(editingResult.Node.Value.TypeName, editValue);
+
+        if (newBytes != null && oldBytes.Length == newBytes.Length)
+        {
+            var data = Save.RawDecompressedData;
+            var section = editingResult.SaveSection;
+            int nextOffset = Save.Sections.Where(s => s.Offset > section.Offset).Select(s => s.Offset).DefaultIfEmpty(data.Length).Min();
+
+            for (int i = section.Offset; i < nextOffset - oldBytes.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < oldBytes.Length; j++)
+                {
+                    if (data[i + j] != oldBytes[j]) { match = false; break; }
+                }
+                if (match)
+                {
+                    Array.Copy(newBytes, 0, data, i, newBytes.Length);
+                    editingResult.Node.Value.RawBytes = newBytes;
+                    editingResult.Node.Value.Value = ParseValue(editingResult.Node.Value.TypeName, editValue);
+                    editingResult.DisplayValue = editingResult.Node.Value.DisplayValue;
+                    await OnStatusMessage.InvokeAsync(($"Updated {editingResult.Path} to {editValue}", true));
+                    break;
+                }
+            }
+        }
+        else
+        {
+            await OnStatusMessage.InvokeAsync(("Failed to update: size mismatch or invalid value", false));
+        }
+
+        editingResult = null;
+    }
+
+    private void CancelEdit() => editingResult = null;
+
+    private void HandleKey(KeyboardEventArgs e) { if (e.Key == "Enter") DoSearch(); }
+    private async Task HandleEditKey(KeyboardEventArgs e) { if (e.Key == "Enter") await SaveEdit(); if (e.Key == "Escape") CancelEdit(); }
+
+    private static bool IsEditable(string typeName) =>
+        typeName is "Bool" or "Int" or "Uint" or "Int8" or "Uint8" or "Int16" or "Uint16" or "Int64" or "Uint64" or "Float";
+
+    private static byte[]? ConvertToBytes(string typeName, string value)
+    {
+        try
+        {
+            return typeName switch
+            {
+                "Bool" => [bool.Parse(value) ? (byte)1 : (byte)0],
+                "Int8" => [(byte)(sbyte)sbyte.Parse(value)],
+                "Uint8" => [byte.Parse(value)],
+                "Int16" => BitConverter.GetBytes(short.Parse(value)),
+                "Uint16" => BitConverter.GetBytes(ushort.Parse(value)),
+                "Int" => BitConverter.GetBytes(int.Parse(value)),
+                "Uint" => BitConverter.GetBytes(uint.Parse(value)),
+                "Int64" => BitConverter.GetBytes(long.Parse(value)),
+                "Uint64" => BitConverter.GetBytes(ulong.Parse(value)),
+                "Float" => BitConverter.GetBytes(float.Parse(value)),
+                _ => null
+            };
+        }
+        catch { return null; }
+    }
+
+    private static object? ParseValue(string typeName, string value)
+    {
+        try
+        {
+            return typeName switch
+            {
+                "Bool" => bool.Parse(value),
+                "Int" => int.Parse(value),
+                "Uint" => uint.Parse(value),
+                "Float" => float.Parse(value),
+                _ => value
+            };
+        }
+        catch { return value; }
+    }
+
+    private class SearchResult
+    {
+        public string Section { get; set; } = "";
+        public string Path { get; set; } = "";
+        public string TypeName { get; set; } = "";
+        public string DisplayValue { get; set; } = "";
+        public bool IsEditable { get; set; }
+        public SaveNode? Node { get; set; }
+        public SaveSection SaveSection { get; set; } = null!;
+    }
+}

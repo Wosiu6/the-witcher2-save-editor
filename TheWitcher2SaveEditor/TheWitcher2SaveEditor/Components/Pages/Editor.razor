@@ -33,8 +33,7 @@ else
             <span class="badge bg-success me-2">Loaded</span>
             <strong>@SaveService.CurrentFileName</strong>
             <span class="text-muted ms-2">
-                (@SaveService.CurrentSave!.Sections.Count sections,
-                @FormatBytes(SaveService.CurrentSave.RawDecompressedData.Length) decompressed)
+                (@FormatBytes(SaveService.CurrentSave!.RawDecompressedData.Length))
             </span>
         </div>
         <div>
@@ -49,59 +48,62 @@ else
 
     @if (!string.IsNullOrEmpty(statusMessage))
     {
-        <div class="alert @statusClass alert-dismissible fade show" role="alert">
+        <div class="alert @statusClass alert-dismissible fade show py-2" role="alert">
             @statusMessage
-            <button type="button" class="btn-close" @onclick="() => statusMessage = null"></button>
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => statusMessage = null"></button>
         </div>
     }
 
-    <div class="row">
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-header"><strong>Sections</strong></div>
-                <div class="list-group list-group-flush" style="max-height: 70vh; overflow-y: auto;">
-                    @foreach (var section in SaveService.CurrentSave!.Sections)
-                    {
-                        <button class="list-group-item list-group-item-action @(selectedSection == section ? "active" : "")"
-                                @onclick="() => SelectSection(section)">
-                            @section.Name
-                            <span class="badge bg-secondary float-end">@CountNodes(section)</span>
-                        </button>
-                    }
-                </div>
-            </div>
-        </div>
-        <div class="col-md-9">
-            @if (selectedSection != null)
-            {
-                <div class="card">
-                    <div class="card-header">
-                        <strong>@selectedSection.Name</strong>
-                        <span class="text-muted ms-2">(offset: @selectedSection.Offset)</span>
-                    </div>
-                    <div class="card-body" style="max-height: 70vh; overflow-y: auto;">
-                        @if (selectedSection.RootNode != null)
-                        {
-                            <RenderNode Node="selectedSection.RootNode"
-                                        SectionName="@selectedSection.Name"
-                                        OnEdit="HandleEdit" />
-                        }
-                        else
-                        {
-                            <p class="text-muted">Unable to parse this section's data structure.</p>
-                        }
-                    </div>
-                </div>
-            }
-            else
-            {
-                <div class="card">
-                    <div class="card-body text-center text-muted py-5">
-                        <p>Select a section from the left to view and edit its contents.</p>
-                    </div>
-                </div>
-            }
-        </div>
+    <!-- Tabs -->
+    <ul class="nav nav-tabs">
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "inventory" ? "active" : "")" @onclick='() => activeTab = "inventory"'>
+                🎒 Inventory
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "quests" ? "active" : "")" @onclick='() => activeTab = "quests"'>
+                📜 Quests
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "facts" ? "active" : "")" @onclick='() => activeTab = "facts"'>
+                🔑 Story Flags
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "search" ? "active" : "")" @onclick='() => activeTab = "search"'>
+                🔍 Search
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "raw" ? "active" : "")" @onclick='() => activeTab = "raw"'>
+                🗂 Raw Sections
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content border border-top-0 p-3">
+        @if (activeTab == "inventory")
+        {
+            <InventoryTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+        }
+        else if (activeTab == "quests")
+        {
+            <QuestsTab Save="SaveService.CurrentSave!" />
+        }
+        else if (activeTab == "facts")
+        {
+            <FactsTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+        }
+        else if (activeTab == "search")
+        {
+            <SearchTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+        }
+        else if (activeTab == "raw")
+        {
+            <RawSectionsTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+        }
     </div>
 }
 
@@ -112,7 +114,7 @@ else
 
 @code {
     private bool isLoading;
-    private SaveSection? selectedSection;
+    private string activeTab = "inventory";
     private string? statusMessage;
     private string statusClass = "alert-info";
 
@@ -133,24 +135,10 @@ else
         }
     }
 
-    private void SelectSection(SaveSection section)
+    private void SetStatus((string message, bool success) s)
     {
-        selectedSection = section;
-    }
-
-    private void HandleEdit((string sectionName, string path, string newValue) edit)
-    {
-        var success = SaveService.ApplyEdit(edit.sectionName, edit.path, edit.newValue);
-        if (success)
-        {
-            statusMessage = $"Successfully updated {edit.path}";
-            statusClass = "alert-success";
-        }
-        else
-        {
-            statusMessage = $"Failed to update {edit.path}. Only same-size value replacements are supported.";
-            statusClass = "alert-warning";
-        }
+        statusMessage = s.message;
+        statusClass = s.success ? "alert-success" : "alert-warning";
         StateHasChanged();
     }
 
@@ -174,7 +162,7 @@ else
 
     private void CloseSave()
     {
-        selectedSection = null;
+        activeTab = "inventory";
         statusMessage = null;
         SaveService.Close();
     }
@@ -184,14 +172,5 @@ else
         if (bytes < 1024) return $"{bytes} B";
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         return $"{bytes / (1024.0 * 1024.0):F1} MB";
-    }
-
-    private static string CountNodes(SaveSection section)
-    {
-        if (section.RootNode == null) return "?";
-        int count = 0;
-        void Walk(SaveNode n) { count++; foreach (var c in n.Children) Walk(c); }
-        Walk(section.RootNode);
-        return count.ToString();
     }
 }

@@ -1,0 +1,83 @@
+@using TheWitcher2SaveEditor.Models
+
+<h5>🔑 Story Flags (Facts)</h5>
+<p class="text-muted small">These are story decisions and world state flags. Each fact represents a choice or event that occurred in the game.</p>
+
+@if (facts.Count == 0)
+{
+    <div class="alert alert-info">No facts/story flags found.</div>
+}
+else
+{
+    <div class="mb-3">
+        <input type="text" class="form-control" placeholder="Search facts (e.g. 'choice', 'quest')..." @bind="filter" @bind:event="oninput" />
+    </div>
+
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>Fact ID</th>
+                <th style="width:100px">Entries</th>
+                <th style="width:100px">Expiring</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var fact in FilteredFacts)
+            {
+                <tr>
+                    <td>
+                        <code>@fact.Id</code>
+                        @if (fact.Id.Contains("Choice", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span class="badge bg-warning text-dark ms-1">Decision</span>
+                        }
+                    </td>
+                    <td>@fact.EntryCount</td>
+                    <td>@fact.ExpiringCount</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="text-muted small">Total: @facts.Count facts, showing @FilteredFacts.Count()</p>
+}
+
+@code {
+    [Parameter] public required W2SaveFile Save { get; set; }
+    [Parameter] public EventCallback<(string message, bool success)> OnStatusMessage { get; set; }
+
+    private List<FactVm> facts = [];
+    private string filter = "";
+
+    private IEnumerable<FactVm> FilteredFacts =>
+        string.IsNullOrWhiteSpace(filter)
+            ? facts
+            : facts.Where(f => f.Id.Contains(filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        facts.Clear();
+        var section = Save.Sections.FirstOrDefault(s => s.Name == "facts");
+        if (section?.RootNode == null) return;
+
+        foreach (var child in section.RootNode.Children.Where(c => c.Name == "fact" && c.NodeType == "BLCK"))
+        {
+            var idNode = child.Children.FirstOrDefault(c => c.Name == "id");
+            var entryCountNode = child.Children.FirstOrDefault(c => c.Name == "entryCount");
+            var expiringNode = child.Children.FirstOrDefault(c => c.Name == "expiringCount");
+
+            facts.Add(new FactVm
+            {
+                Id = idNode?.Value?.DisplayValue ?? "Unknown",
+                EntryCount = entryCountNode?.Value?.Value as uint? ?? 0,
+                ExpiringCount = expiringNode?.Value?.Value as uint? ?? 0
+            });
+        }
+    }
+
+    private class FactVm
+    {
+        public string Id { get; set; } = "";
+        public uint EntryCount { get; set; }
+        public uint ExpiringCount { get; set; }
+    }
+}

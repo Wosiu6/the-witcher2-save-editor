@@ -1,0 +1,116 @@
+@using TheWitcher2SaveEditor.Models
+
+<h5>🗂 Raw Section Browser</h5>
+<p class="text-muted small">Browse the raw save file data tree. Expand nodes to explore.</p>
+
+<div class="row">
+    <div class="col-md-3">
+        <div class="list-group" style="max-height: 65vh; overflow-y: auto;">
+            @foreach (var section in Save.Sections)
+            {
+                <button class="list-group-item list-group-item-action py-2 @(selectedSection == section ? "active" : "")"
+                        @onclick="() => selectedSection = section">
+                    <small>@section.Name</small>
+                </button>
+            }
+        </div>
+    </div>
+    <div class="col-md-9">
+        @if (selectedSection?.RootNode != null)
+        {
+            <div style="max-height: 65vh; overflow-y: auto;">
+                <RenderNode Node="selectedSection.RootNode" SectionName="@selectedSection.Name" OnEdit="HandleEdit" />
+            </div>
+        }
+        else if (selectedSection != null)
+        {
+            <p class="text-muted">Unable to parse this section.</p>
+        }
+        else
+        {
+            <p class="text-muted">Select a section from the left.</p>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public required W2SaveFile Save { get; set; }
+    [Parameter] public EventCallback<(string message, bool success)> OnStatusMessage { get; set; }
+
+    private SaveSection? selectedSection;
+
+    private async Task HandleEdit((string sectionName, string path, string newValue) edit)
+    {
+        // Find the node and edit directly in raw data
+        var section = Save.Sections.FirstOrDefault(s => s.Name == edit.sectionName);
+        if (section?.RootNode == null) return;
+
+        // Simple approach: search for node by name in the section
+        SaveNode? found = null;
+        void Find(SaveNode n) {
+            if (n.Name == edit.path && n.Value != null) { found = n; return; }
+            foreach (var c in n.Children) { Find(c); if (found != null) return; }
+        }
+        Find(section.RootNode);
+
+        if (found?.Value != null)
+        {
+            var oldBytes = found.Value.RawBytes;
+            var newBytes = ConvertToBytes(found.Value.TypeName, edit.newValue);
+            if (newBytes != null && oldBytes.Length == newBytes.Length)
+            {
+                var data = Save.RawDecompressedData;
+                int nextOffset = Save.Sections.Where(s => s.Offset > section.Offset).Select(s => s.Offset).DefaultIfEmpty(data.Length).Min();
+                for (int i = section.Offset; i < nextOffset - oldBytes.Length; i++)
+                {
+                    bool match = true;
+                    for (int j = 0; j < oldBytes.Length; j++)
+                        if (data[i + j] != oldBytes[j]) { match = false; break; }
+                    if (match)
+                    {
+                        Array.Copy(newBytes, 0, data, i, newBytes.Length);
+                        found.Value.RawBytes = newBytes;
+                        found.Value.Value = ParseValue(found.Value.TypeName, edit.newValue);
+                        await OnStatusMessage.InvokeAsync(($"Updated {edit.path}", true));
+                        return;
+                    }
+                }
+            }
+        }
+        await OnStatusMessage.InvokeAsync(($"Failed to update {edit.path}", false));
+    }
+
+    private static byte[]? ConvertToBytes(string typeName, string value)
+    {
+        try
+        {
+            return typeName switch
+            {
+                "Bool" => [bool.Parse(value) ? (byte)1 : (byte)0],
+                "Int" => BitConverter.GetBytes(int.Parse(value)),
+                "Uint" => BitConverter.GetBytes(uint.Parse(value)),
+                "Float" => BitConverter.GetBytes(float.Parse(value)),
+                "Int16" => BitConverter.GetBytes(short.Parse(value)),
+                "Uint16" => BitConverter.GetBytes(ushort.Parse(value)),
+                _ => null
+            };
+        }
+        catch { return null; }
+    }
+
+    private static object? ParseValue(string typeName, string value)
+    {
+        try
+        {
+            return typeName switch
+            {
+                "Bool" => bool.Parse(value),
+                "Int" => int.Parse(value),
+                "Uint" => uint.Parse(value),
+                "Float" => float.Parse(value),
+                _ => value
+            };
+        }
+        catch { return value; }
+    }
+}

@@ -1,0 +1,186 @@
+@using TheWitcher2SaveEditor.Models
+@using TheWitcher2SaveEditor.Services
+
+<h5>🎒 Player Inventory</h5>
+<p class="text-muted small">Edit item quantities, or change equipped items. The first entity with a large inventory is Geralt's.</p>
+
+@if (inventoryItems.Count == 0)
+{
+    <div class="alert alert-info">No inventory data found in this save file.</div>
+}
+else
+{
+    <div class="mb-3">
+        <input type="text" class="form-control" placeholder="Filter items..." @bind="filter" @bind:event="oninput" />
+    </div>
+
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>Item Name</th>
+                <th style="width:100px">Qty</th>
+                <th style="width:80px">Flags</th>
+                <th style="width:60px">Edit</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in FilteredItems)
+            {
+                <tr>
+                    <td>
+                        <span class="@GetItemClass(item)">@item.Name</span>
+                    </td>
+                    <td>
+                        @if (editingItem == item)
+                        {
+                            <input type="number" class="form-control form-control-sm" style="width:80px"
+                                   @bind="editQty" @onkeydown="HandleKey" />
+                        }
+                        else
+                        {
+                            @item.Quantity
+                        }
+                    </td>
+                    <td><span class="badge bg-secondary">@item.Flags</span></td>
+                    <td>
+                        @if (editingItem == item)
+                        {
+                            <button class="btn btn-success btn-sm py-0 px-1" @onclick="SaveEdit">✓</button>
+                            <button class="btn btn-secondary btn-sm py-0 px-1" @onclick="CancelEdit">✕</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-primary btn-sm py-0 px-1" @onclick="() => StartEdit(item)">✏</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="text-muted small">Showing @FilteredItems.Count() of @inventoryItems.Count items. Flags: equipped items have flag values ≥ 16.</p>
+}
+
+@code {
+    [Parameter] public required W2SaveFile Save { get; set; }
+    [Parameter] public EventCallback<(string message, bool success)> OnStatusMessage { get; set; }
+
+    private List<InventoryItemVm> inventoryItems = [];
+    private string filter = "";
+    private InventoryItemVm? editingItem;
+    private uint editQty;
+
+    private IEnumerable<InventoryItemVm> FilteredItems =>
+        string.IsNullOrWhiteSpace(filter)
+            ? inventoryItems
+            : inventoryItems.Where(i => i.Name.Contains(filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        inventoryItems.Clear();
+        var section = Save.Sections.FirstOrDefault(s => s.Name == "dynamicEntities");
+        if (section?.RootNode == null) return;
+
+        FindInventories(section.RootNode, true);
+    }
+
+    private void FindInventories(SaveNode node, bool playerOnly)
+    {
+        if (node.Name == "inventory" && node.NodeType == "BLCK")
+        {
+            var itemCountNode = node.Children.FirstOrDefault(c => c.Name == "itemCount");
+            var count = itemCountNode?.Value?.Value as uint? ?? 0;
+
+            // Player inventory is the largest one
+            if (!playerOnly || count >= 10)
+            {
+                foreach (var item in node.Children.Where(c => c.Name == "item"))
+                {
+                    var nameNode = item.Children.FirstOrDefault(c => c.Name == "name");
+                    var qtyNode = item.Children.FirstOrDefault(c => c.Name == "quantity");
+                    var flagsNode = item.Children.FirstOrDefault(c => c.Name == "flags");
+
+                    if (nameNode?.Value != null)
+                    {
+                        inventoryItems.Add(new InventoryItemVm
+                        {
+                            Name = nameNode.Value.DisplayValue,
+                            Quantity = qtyNode?.Value?.Value as uint? ?? 1,
+                            Flags = flagsNode?.Value?.Value as ushort? ?? 0,
+                            QuantityNode = qtyNode,
+                            Section = Save.Sections.First(s => s.Name == "dynamicEntities")
+                        });
+                    }
+                }
+
+                if (playerOnly && inventoryItems.Count > 0) return;
+            }
+        }
+
+        foreach (var c in node.Children)
+        {
+            FindInventories(c, playerOnly);
+            if (playerOnly && inventoryItems.Count > 0) return;
+        }
+    }
+
+    private void StartEdit(InventoryItemVm item)
+    {
+        editingItem = item;
+        editQty = item.Quantity;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (editingItem?.QuantityNode?.Value == null) return;
+
+        var oldBytes = editingItem.QuantityNode.Value.RawBytes;
+        var newBytes = BitConverter.GetBytes(editQty);
+
+        if (oldBytes.Length == newBytes.Length)
+        {
+            // Direct replacement in raw data
+            var data = Save.RawDecompressedData;
+            var section = editingItem.Section;
+            int nextOffset = Save.Sections.Where(s => s.Offset > section.Offset).Select(s => s.Offset).DefaultIfEmpty(data.Length).Min();
+
+            for (int i = section.Offset; i < nextOffset - oldBytes.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < oldBytes.Length; j++)
+                {
+                    if (data[i + j] != oldBytes[j]) { match = false; break; }
+                }
+                if (match)
+                {
+                    Array.Copy(newBytes, 0, data, i, newBytes.Length);
+                    editingItem.QuantityNode.Value.RawBytes = newBytes;
+                    editingItem.QuantityNode.Value.Value = editQty;
+                    editingItem.Quantity = editQty;
+                    await OnStatusMessage.InvokeAsync(($"Updated {editingItem.Name} quantity to {editQty}", true));
+                    break;
+                }
+            }
+        }
+
+        editingItem = null;
+    }
+
+    private void CancelEdit() => editingItem = null;
+
+    private async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveEdit();
+        if (e.Key == "Escape") CancelEdit();
+    }
+
+    private static string GetItemClass(InventoryItemVm item) => item.Flags >= 16 ? "fw-bold text-success" : "";
+
+    private class InventoryItemVm
+    {
+        public string Name { get; set; } = "";
+        public uint Quantity { get; set; }
+        public ushort Flags { get; set; }
+        public SaveNode? QuantityNode { get; set; }
+        public SaveSection Section { get; set; } = null!;
+    }
+}
