@@ -13,6 +13,7 @@ public class Program
             .AddInteractiveServerComponents();
 
         builder.Services.AddScoped<SaveFileService>();
+        builder.Services.AddSingleton<FileDialogService>();
 
         var app = builder.Build();
 

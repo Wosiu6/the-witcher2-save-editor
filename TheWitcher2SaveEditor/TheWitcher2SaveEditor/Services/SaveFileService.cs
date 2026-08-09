@@ -10,48 +10,33 @@ public class SaveFileService
     private readonly SaveFileParser _parser = new();
 
     public W2SaveFile? CurrentSave { get; private set; }
-    public string? CurrentFileName { get; private set; }
+    public string? CurrentFilePath { get; private set; }
+    public string? CurrentFileName => CurrentFilePath != null ? Path.GetFileName(CurrentFilePath) : null;
     public string? ErrorMessage { get; private set; }
     public bool IsLoaded => CurrentSave != null;
 
     public event Action? OnStateChanged;
 
-    public async Task LoadFromStream(Stream stream, string fileName)
+    public Task<bool> LoadFromPathAsync(string filePath)
     {
-        try
+        return Task.Run(() =>
         {
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-
-            CurrentSave = _parser.Parse(bytes);
-            CurrentFileName = fileName;
-            ErrorMessage = null;
-        }
-        catch (Exception ex)
-        {
-            CurrentSave = null;
-            CurrentFileName = null;
-            ErrorMessage = $"Failed to load save file: {ex.Message}";
-        }
-        OnStateChanged?.Invoke();
-    }
-
-    public void LoadFromBytes(byte[] bytes, string fileName)
-    {
-        try
-        {
-            CurrentSave = _parser.Parse(bytes);
-            CurrentFileName = fileName;
-            ErrorMessage = null;
-        }
-        catch (Exception ex)
-        {
-            CurrentSave = null;
-            CurrentFileName = null;
-            ErrorMessage = $"Failed to load save file: {ex.Message}";
-        }
-        OnStateChanged?.Invoke();
+            try
+            {
+                var bytes = File.ReadAllBytes(filePath);
+                CurrentSave = _parser.Parse(bytes);
+                CurrentFilePath = filePath;
+                ErrorMessage = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CurrentSave = null;
+                CurrentFilePath = null;
+                ErrorMessage = $"Failed to load save file: {ex.Message}";
+                return false;
+            }
+        });
     }
 
     public bool ApplyEdit(string sectionName, string nodePath, string newValue)
@@ -68,24 +53,35 @@ public class SaveFileService
         }
     }
 
-    public byte[]? Export()
+    public Task<bool> SaveToPathAsync(string filePath)
     {
-        if (CurrentSave == null) return null;
+        if (CurrentSave == null) return Task.FromResult(false);
 
-        try
+        return Task.Run(() =>
         {
-            return _parser.Rebuild(CurrentSave);
-        }
-        catch
-        {
-            return null;
-        }
+            try
+            {
+                var bytes = _parser.Rebuild(CurrentSave);
+                File.WriteAllBytes(filePath, bytes);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        });
+    }
+
+    public Task<bool> SaveAsync()
+    {
+        if (CurrentFilePath == null) return Task.FromResult(false);
+        return SaveToPathAsync(CurrentFilePath);
     }
 
     public void Close()
     {
         CurrentSave = null;
-        CurrentFileName = null;
+        CurrentFilePath = null;
         ErrorMessage = null;
         OnStateChanged?.Invoke();
     }

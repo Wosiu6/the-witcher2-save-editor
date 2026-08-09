@@ -1,7 +1,7 @@
 @page "/editor"
 @rendermode InteractiveServer
 @inject SaveFileService SaveService
-@inject IJSRuntime JS
+@inject FileDialogService FileDialog
 
 <PageTitle>Editor - Witcher 2 Save Editor</PageTitle>
 
@@ -14,7 +14,9 @@
             <div class="card-body">
                 <h5 class="card-title">Load Save File</h5>
                 <p>Select a Witcher 2 save file (.sav) to edit:</p>
-                <InputFile OnChange="HandleFileUpload" accept=".sav" class="form-control" />
+                <button class="btn btn-primary" @onclick="OpenFile" disabled="@isLoading">
+                    📂 Browse for .sav file...
+                </button>
                 @if (isLoading)
                 {
                     <div class="mt-2">
@@ -37,8 +39,11 @@ else
             </span>
         </div>
         <div>
-            <button class="btn btn-primary btn-sm me-2" @onclick="ExportSave">
-                ⬇ Export Modified Save
+            <button class="btn btn-success btn-sm me-2" @onclick="SaveFile">
+                💾 Save
+            </button>
+            <button class="btn btn-primary btn-sm me-2" @onclick="SaveFileAs">
+                💾 Save As...
             </button>
             <button class="btn btn-outline-secondary btn-sm" @onclick="CloseSave">
                 ✕ Close
@@ -118,20 +123,22 @@ else
     private string? statusMessage;
     private string statusClass = "alert-info";
 
-    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    private async Task OpenFile()
     {
+        var path = await FileDialog.PickSaveFileAsync();
+        if (path == null) return;
+
         isLoading = true;
         StateHasChanged();
 
         try
         {
-            var file = e.File;
-            using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
-            await SaveService.LoadFromStream(stream, file.Name);
+            await SaveService.LoadFromPathAsync(path);
         }
         finally
         {
             isLoading = false;
+            StateHasChanged();
         }
     }
 
@@ -142,22 +149,21 @@ else
         StateHasChanged();
     }
 
-    private async Task ExportSave()
+    private async Task SaveFile()
     {
-        var bytes = SaveService.Export();
-        if (bytes != null)
-        {
-            var base64 = Convert.ToBase64String(bytes);
-            var fileName = SaveService.CurrentFileName ?? "modified.sav";
-            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
-            statusMessage = $"Exported {fileName} ({FormatBytes(bytes.Length)})";
-            statusClass = "alert-success";
-        }
-        else
-        {
-            statusMessage = "Export failed.";
-            statusClass = "alert-danger";
-        }
+        var success = await SaveService.SaveAsync();
+        statusMessage = success ? "Saved successfully!" : "Save failed.";
+        statusClass = success ? "alert-success" : "alert-danger";
+    }
+
+    private async Task SaveFileAs()
+    {
+        var path = await FileDialog.PickSaveLocationAsync(SaveService.CurrentFileName ?? "modified.sav");
+        if (path == null) return;
+
+        var success = await SaveService.SaveToPathAsync(path);
+        statusMessage = success ? $"Saved to {path}" : "Save failed.";
+        statusClass = success ? "alert-success" : "alert-danger";
     }
 
     private void CloseSave()
