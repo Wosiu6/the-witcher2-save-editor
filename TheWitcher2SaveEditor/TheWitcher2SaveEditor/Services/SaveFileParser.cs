@@ -29,34 +29,90 @@ public class SaveFileParser
 
     public byte[] Rebuild(W2SaveFile save)
     {
-        // Compress the modified decompressed data back into DZIP format
         var decompressed = save.RawDecompressedData;
-        var compressed = CompressData(decompressed);
 
-        // Build the DZIP file
+        // Compress entire decompressed data as ONE LZF stream (matching how the game reads it)
+        var compBuffer = new byte[decompressed.Length + decompressed.Length / 16 + 64 + 3];
+        int compSize = Lzf.Compress(decompressed, decompressed.Length, compBuffer, compBuffer.Length);
+
+        byte[] compressed;
+        if (compSize == 0)
+        {
+            compressed = EncodeLzfLiterals(decompressed, 0, decompressed.Length);
+        }
+        else
+        {
+            compressed = new byte[compSize];
+            Array.Copy(compBuffer, compressed, compSize);
+        }
+
+        // Build seek table for game engine random access (offsets within compressed stream)
+        // Each entry corresponds to where a 65536-byte decompressed boundary maps in compressed data
+        // We compute this by doing a trial decompress pass
+        const int decompBlockSize = 65536;
+        int numSeekEntries = (decompressed.Length / decompBlockSize);
+        if (numSeekEntries < 1) numSeekEntries = 0;
+
+        var seekTable = new int[numSeekEntries];
+        if (numSeekEntries > 0)
+        {
+            // Build seek table by scanning through compressed stream
+            // to find where each 64KB decompressed boundary occurs
+            int iidx = 0;
+            int oidx = 0;
+            int seekIdx = 0;
+            int nextBoundary = decompBlockSize;
+
+            while (iidx < compressed.Length && seekIdx < numSeekEntries)
+            {
+                uint ctrl = compressed[iidx++];
+                if (ctrl < 32)
+                {
+                    ctrl++;
+                    oidx += (int)ctrl;
+                    iidx += (int)ctrl;
+                }
+                else
+                {
+                    uint len = ctrl >> 5;
+                    if (len == 7) len += compressed[iidx++];
+                    iidx++;
+                    oidx += (int)len + 2;
+                }
+
+                while (seekIdx < numSeekEntries && oidx >= nextBoundary)
+                {
+                    seekTable[seekIdx] = iidx;
+                    seekIdx++;
+                    nextBoundary += decompBlockSize;
+                }
+            }
+        }
+
+        int seekTableBytes = numSeekEntries * 4;
+        int localOffset = 4 + seekTableBytes;
+        long compressedLength = localOffset + compressed.Length;
+        long dataOffset = 32;
+        long metaOffset = dataOffset + compressedLength;
+
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
-        // DZIP header
+        // DZIP header (32 bytes)
         writer.Write(Encoding.ASCII.GetBytes("DZIP"));
         writer.Write(save.DzipHeader.Version);
         writer.Write(save.DzipHeader.FileCount);
         writer.Write(save.DzipHeader.UserId);
-
-        // Calculate offsets
-        long dataOffset = 32; // header size
-        long compressedLength = compressed.Length + 4; // +4 for localOffset int
-
-        // metaOffset = end of compressed data
-        long metaOffset = dataOffset + compressedLength;
         writer.Write(metaOffset);
         writer.Write(save.DzipHeader.Unknown);
 
-        // Write compressed data with localOffset = 4 (no seek table for simplicity)
-        writer.Write(4); // localOffset
+        // Data: localOffset + seek table + compressed stream
+        writer.Write(localOffset);
+        foreach (var entry in seekTable)
+            writer.Write(entry);
         writer.Write(compressed);
 
-        // Write file entry table at metaOffset
+        // File entry table at metaOffset
         var filename = Encoding.UTF8.GetBytes(save.FileEntry.Filename);
         writer.Write((short)filename.Length);
         writer.Write(filename);
@@ -125,34 +181,15 @@ public class SaveFileParser
         return output;
     }
 
-    private static byte[] CompressData(byte[] data)
+    private static byte[] EncodeLzfLiterals(byte[] data, int offset, int length)
     {
-        // LZF worst case: slightly larger than input
-        var output = new byte[data.Length + data.Length / 16 + 64 + 3];
-        int compressedSize = Lzf.Compress(data, data.Length, output, output.Length);
-
-        if (compressedSize == 0)
-        {
-            // Compression failed (data is incompressible), store raw
-            // Use a simple literal-only LZF encoding
-            return EncodeLzfLiterals(data);
-        }
-
-        var result = new byte[compressedSize];
-        Array.Copy(output, result, compressedSize);
-        return result;
-    }
-
-    private static byte[] EncodeLzfLiterals(byte[] data)
-    {
-        // Encode as pure LZF literal runs (max 32 bytes per run)
         using var ms = new MemoryStream();
         int pos = 0;
-        while (pos < data.Length)
+        while (pos < length)
         {
-            int runLen = Math.Min(32, data.Length - pos);
+            int runLen = Math.Min(32, length - pos);
             ms.WriteByte((byte)(runLen - 1));
-            ms.Write(data, pos, runLen);
+            ms.Write(data, offset + pos, runLen);
             pos += runLen;
         }
         return ms.ToArray();
