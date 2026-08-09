@@ -3,27 +3,15 @@ using TheWitcher2SaveEditor.Models;
 
 namespace TheWitcher2SaveEditor.Services;
 
-/// <summary>
-/// Parses Witcher 2 .sav files (DZIP container with LZF-compressed SAVY data)
-/// </summary>
 public class SaveFileParser
 {
     public W2SaveFile Parse(byte[] fileBytes)
     {
         var save = new W2SaveFile();
-
-        // Parse DZIP header
         save.DzipHeader = ParseDzipHeader(fileBytes);
-
-        // Parse file entry (at metaOffset)
         save.FileEntry = ParseFileEntry(fileBytes, (int)save.DzipHeader.MetaOffset);
-
-        // Decompress
         save.RawDecompressedData = DecompressFileData(fileBytes, save.FileEntry);
-
-        // Parse SAVY structure
         ParseSavyStructure(save);
-
         return save;
     }
 
@@ -31,33 +19,25 @@ public class SaveFileParser
     {
         var decompressed = save.RawDecompressedData;
 
-        // Compress entire decompressed data as ONE LZF stream (matching how the game reads it)
         var compBuffer = new byte[decompressed.Length + decompressed.Length / 16 + 64 + 3];
         int compSize = Lzf.Compress(decompressed, decompressed.Length, compBuffer, compBuffer.Length);
 
         byte[] compressed;
         if (compSize == 0)
-        {
             compressed = EncodeLzfLiterals(decompressed, 0, decompressed.Length);
-        }
         else
         {
             compressed = new byte[compSize];
             Array.Copy(compBuffer, compressed, compSize);
         }
 
-        // Build seek table for game engine random access (offsets within compressed stream)
-        // Each entry corresponds to where a 65536-byte decompressed boundary maps in compressed data
-        // We compute this by doing a trial decompress pass
         const int decompBlockSize = 65536;
-        int numSeekEntries = (decompressed.Length / decompBlockSize);
+        int numSeekEntries = decompressed.Length / decompBlockSize;
         if (numSeekEntries < 1) numSeekEntries = 0;
 
         var seekTable = new int[numSeekEntries];
         if (numSeekEntries > 0)
         {
-            // Build seek table by scanning through compressed stream
-            // to find where each 64KB decompressed boundary occurs
             int iidx = 0;
             int oidx = 0;
             int seekIdx = 0;
@@ -98,7 +78,6 @@ public class SaveFileParser
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
-        // DZIP header (32 bytes)
         writer.Write(Encoding.ASCII.GetBytes("DZIP"));
         writer.Write(save.DzipHeader.Version);
         writer.Write(save.DzipHeader.FileCount);
@@ -106,17 +85,15 @@ public class SaveFileParser
         writer.Write(metaOffset);
         writer.Write(save.DzipHeader.Unknown);
 
-        // Data: localOffset + seek table + compressed stream
         writer.Write(localOffset);
         foreach (var entry in seekTable)
             writer.Write(entry);
         writer.Write(compressed);
 
-        // File entry table at metaOffset
         var filename = Encoding.UTF8.GetBytes(save.FileEntry.Filename);
         writer.Write((short)filename.Length);
         writer.Write(filename);
-        writer.Write(save.FileEntry.Crc);
+        writer.Write(DateTime.UtcNow.ToFileTimeUtc());
         writer.Write((long)decompressed.Length);
         writer.Write(dataOffset);
         writer.Write(compressedLength);
@@ -208,7 +185,6 @@ public class SaveFileParser
         save.Unknown1 = BitConverter.ToInt32(data, 4);
         save.Unknown2 = BitConverter.ToInt32(data, 8);
 
-        // Parse section table (up to 32 sections: 32 bytes name + 4 bytes offset each)
         int pos = 12;
         for (int i = 0; i < 32; i++)
         {
@@ -224,7 +200,6 @@ public class SaveFileParser
             save.Sections.Add(new SaveSection { Name = name, Offset = offset });
         }
 
-        // Parse each section's data
         foreach (var section in save.Sections)
         {
             try
@@ -233,7 +208,6 @@ public class SaveFileParser
             }
             catch
             {
-                // Some sections may have complex/unknown structures - skip gracefully
             }
         }
     }
@@ -293,7 +267,6 @@ public class SaveFileParser
                         nodes.Add(ReadKcup(reader));
                         break;
                     default:
-                        // Unknown tag - stop parsing this block
                         return nodes;
                 }
             }
@@ -344,7 +317,6 @@ public class SaveFileParser
         var typeNameLength = b & 0x7f;
         var typeName = Encoding.UTF8.GetString(reader.ReadBytes(typeNameLength));
 
-        // Read value length
         var firstTwo = reader.ReadBytes(2);
         int valueLength;
         if (firstTwo[0] == 0xff && firstTwo[1] == 0xff)
@@ -421,9 +393,6 @@ public class SaveFileParser
             : Encoding.UTF8.GetString(data, dataIndex, expectedLength);
     }
 
-    /// <summary>
-    /// Apply an edit to a specific value node in the decompressed data
-    /// </summary>
     public bool ApplyEdit(W2SaveFile save, string sectionName, string nodePath, string newValue)
     {
         var section = save.Sections.FirstOrDefault(s => s.Name == sectionName);
@@ -432,11 +401,9 @@ public class SaveFileParser
         var node = FindNode(section.RootNode, nodePath);
         if (node?.Value == null) return false;
 
-        // Convert new value to raw bytes based on type
         var newBytes = ConvertToBytes(node.Value.TypeName, newValue);
         if (newBytes == null) return false;
 
-        // Find and replace the value in the raw decompressed data
         return ReplaceValueInRawData(save, section, node, newBytes);
     }
 

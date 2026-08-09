@@ -1,45 +1,53 @@
 @using TheWitcher2SaveEditor.Models
 
-<h5>🔑 Story Flags (Facts)</h5>
-<p class="text-muted small">These are story decisions and world state flags. Each fact represents a choice or event that occurred in the game.</p>
-
-@if (facts.Count == 0)
-{
-    <div class="alert alert-info">No facts/story flags found.</div>
-}
-else
-{
-    <div class="mb-3">
-        <input type="text" class="form-control" placeholder="Search facts (e.g. 'choice', 'quest')..." @bind="filter" @bind:event="oninput" />
+<section class="panel-card">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Story Flags</p>
+            <h3>Facts and decisions</h3>
+        </div>
     </div>
 
-    <table class="table table-sm table-hover">
-        <thead>
-            <tr>
-                <th>Fact ID</th>
-                <th style="width:100px">Entries</th>
-                <th style="width:100px">Expiring</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var fact in FilteredFacts)
-            {
-                <tr>
-                    <td>
-                        <code>@fact.Id</code>
-                        @if (fact.Id.Contains("Choice", StringComparison.OrdinalIgnoreCase))
-                        {
-                            <span class="badge bg-warning text-dark ms-1">Decision</span>
-                        }
-                    </td>
-                    <td>@fact.EntryCount</td>
-                    <td>@fact.ExpiringCount</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <p class="text-muted small">Total: @facts.Count facts, showing @FilteredFacts.Count()</p>
-}
+    @if (facts.Count == 0)
+    {
+        <p class="support-copy">No facts/story flags found.</p>
+    }
+    else
+    {
+        <div style="margin-bottom:14px">
+            <input class="editor-input" placeholder="Search facts..." @bind="filter" @bind:event="oninput" />
+        </div>
+
+        <div class="table-shell">
+            <table class="editor-table">
+                <thead>
+                    <tr>
+                        <th>Fact ID</th>
+                        <th>Entries</th>
+                        <th>Expiring</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var fact in FilteredFacts)
+                    {
+                        <tr>
+                            <td>
+                                <code>@fact.Id</code>
+                                @if (fact.Id.Contains("Choice", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <span class="badge badge-warning" style="margin-left:8px">Decision</span>
+                                }
+                            </td>
+                            <td>@fact.EntryCount</td>
+                            <td>@fact.ExpiringCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="support-copy" style="margin-top:10px">Total: @facts.Count facts, showing @FilteredFacts.Count()</p>
+    }
+</section>
 
 @code {
     [Parameter] public required W2SaveFile Save { get; set; }

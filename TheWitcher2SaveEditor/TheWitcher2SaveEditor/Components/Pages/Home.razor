@@ -1,36 +1,170 @@
-﻿@page "/"
+@page "/"
+@rendermode InteractiveServer
+@inject SaveFileService SaveService
+@inject FileDialogService FileDialog
 
-<PageTitle>Witcher 2 Save Editor</PageTitle>
+<PageTitle>The Witcher 2 Save Editor</PageTitle>
 
-<h1>The Witcher 2 Save Editor</h1>
-
-<p class="lead">
-    A multiplatform save game editor for The Witcher 2: Assassins of Kings.
-</p>
-
-<div class="card mt-4">
-    <div class="card-body">
-        <h5 class="card-title">Getting Started</h5>
-        <p class="card-text">
-            Navigate to the <a href="editor">Editor</a> page to upload and edit your Witcher 2 save files (.sav).
-        </p>
-        <h6>Features:</h6>
-        <ul>
-            <li>Load and parse <code>.sav</code> files (DZIP/LZF compressed format)</li>
-            <li>Browse all save data sections (quests, facts, world state, etc.)</li>
-            <li>Edit values (integers, floats, booleans, strings)</li>
-            <li>Export modified save files</li>
-            <li>View the full save data tree structure</li>
-        </ul>
-        <h6>Save File Sections:</h6>
-        <ul>
-            <li><strong>saveInfo</strong> &ndash; Save metadata, difficulty, save message</li>
-            <li><strong>questSystem</strong> &ndash; Active quests and quest states</li>
-            <li><strong>questLogBlock</strong> &ndash; Quest log progress</li>
-            <li><strong>facts</strong> &ndash; World facts and story flags</li>
-            <li><strong>worldInfo</strong> &ndash; Current world/location data</li>
-            <li><strong>dynamicEntities</strong> &ndash; NPCs, items, entities in the world</li>
-            <li><strong>playerSpawn</strong> &ndash; Player position and spawn info</li>
-        </ul>
+<section class="panel-card panel-card-large">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Open Save</p>
+            <h3>Load a Witcher 2 save file</h3>
+        </div>
     </div>
-</div>
+
+    <div class="button-row">
+        <button class="action-button" @onclick="OpenFile" disabled="@isLoading">Browse</button>
+        @if (SaveService.IsLoaded)
+        {
+            <button class="action-button" @onclick="SaveFile">Save Changes</button>
+            <button class="action-button action-button-secondary" @onclick="SaveFileAs">Save As</button>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <p class="support-copy" style="margin-top:12px"><span class="loading-spinner"></span> Loading...</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(SaveService.ErrorMessage))
+    {
+        <p class="status-banner status-banner-error">@SaveService.ErrorMessage</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(statusMessage))
+    {
+        <p class="status-banner @statusClass">@statusMessage</p>
+    }
+
+    @if (steamSavePath != null)
+    {
+        <p class="support-copy" style="margin-top:10px">Steam saves: <code>@steamSavePath</code></p>
+    }
+</section>
+
+@if (SaveService.IsLoaded)
+{
+    <section class="summary-strip">
+        <article class="summary-card">
+            <span class="summary-label">Loaded Save</span>
+            <strong>@SaveService.CurrentFileName</strong>
+            <span class="support-copy">@FormatBytes(SaveService.CurrentSave!.RawDecompressedData.Length) decompressed</span>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Sections</span>
+            <strong>@SaveService.CurrentSave!.Sections.Count</strong>
+            <span class="support-copy">parsed data blocks</span>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Format</span>
+            <strong>DZIP v@(SaveService.CurrentSave!.DzipHeader.Version)</strong>
+            <span class="support-copy">LZF compressed</span>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Location</span>
+            <strong>@(SteamCloudService.IsInSteamRemoteFolder(SaveService.CurrentFilePath!) ? "Steam Cloud" : "Local")</strong>
+            <span class="support-copy">@Path.GetDirectoryName(SaveService.CurrentFilePath)</span>
+        </article>
+    </section>
+
+    <section class="tab-strip">
+        @foreach (var tab in tabs)
+        {
+            <button class="tab-button @(selectedTab == tab.Key ? "active" : "")" @onclick="() => selectedTab = tab.Key">@tab.Value</button>
+        }
+    </section>
+
+    @if (selectedTab == "inventory")
+    {
+        <InventoryTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+    }
+    else if (selectedTab == "quests")
+    {
+        <QuestsTab Save="SaveService.CurrentSave!" />
+    }
+    else if (selectedTab == "facts")
+    {
+        <FactsTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+    }
+    else if (selectedTab == "search")
+    {
+        <SearchTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+    }
+    else if (selectedTab == "explorer")
+    {
+        <RawSectionsTab Save="SaveService.CurrentSave!" OnStatusMessage="SetStatus" />
+    }
+}
+
+@code {
+    private readonly IReadOnlyList<KeyValuePair<string, string>> tabs =
+    [
+        new("inventory", "Inventory"),
+        new("quests", "Quests"),
+        new("facts", "Story Flags"),
+        new("search", "Search"),
+        new("explorer", "Explorer")
+    ];
+
+    private string selectedTab = "inventory";
+    private bool isLoading;
+    private string? statusMessage;
+    private string statusClass = "status-banner-ok";
+    private string? steamSavePath = FileDialogService.FindSteamW2SaveFolder();
+
+    private async Task OpenFile()
+    {
+        var path = await FileDialog.PickSaveFileAsync();
+        if (path == null) return;
+
+        isLoading = true;
+        statusMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await SaveService.LoadFromPathAsync(path);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetStatus((string message, bool success) s)
+    {
+        statusMessage = s.message;
+        statusClass = s.success ? "status-banner-ok" : "status-banner-error";
+        StateHasChanged();
+    }
+
+    private async Task SaveFile()
+    {
+        var success = await SaveService.SaveAsync();
+        statusMessage = success ? "Saved successfully. Steam Cloud metadata updated." : "Save failed.";
+        statusClass = success ? "status-banner-ok" : "status-banner-error";
+    }
+
+    private async Task SaveFileAs()
+    {
+        var path = await FileDialog.PickSaveLocationAsync(SaveService.CurrentFileName ?? "modified.sav");
+        if (path == null) return;
+
+        var success = await SaveService.SaveToPathAsync(path);
+        if (success && SteamCloudService.IsInSteamRemoteFolder(path))
+            statusMessage = $"Saved to {Path.GetFileName(path)} — Steam Cloud updated.";
+        else if (success)
+            statusMessage = $"Saved to {Path.GetFileName(path)}";
+        else
+            statusMessage = "Save failed.";
+        statusClass = success ? "status-banner-ok" : "status-banner-error";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+}

@@ -2,9 +2,6 @@ using TheWitcher2SaveEditor.Models;
 
 namespace TheWitcher2SaveEditor.Services;
 
-/// <summary>
-/// Manages the currently loaded save file state for the application
-/// </summary>
 public class SaveFileService
 {
     private readonly SaveFileParser _parser = new();
@@ -42,15 +39,8 @@ public class SaveFileService
     public bool ApplyEdit(string sectionName, string nodePath, string newValue)
     {
         if (CurrentSave == null) return false;
-
-        try
-        {
-            return _parser.ApplyEdit(CurrentSave, sectionName, nodePath, newValue);
-        }
-        catch
-        {
-            return false;
-        }
+        try { return _parser.ApplyEdit(CurrentSave, sectionName, nodePath, newValue); }
+        catch { return false; }
     }
 
     public Task<bool> SaveToPathAsync(string filePath)
@@ -63,6 +53,10 @@ public class SaveFileService
             {
                 var bytes = _parser.Rebuild(CurrentSave);
                 File.WriteAllBytes(filePath, bytes);
+
+                if (SteamCloudService.IsInSteamRemoteFolder(filePath))
+                    SteamCloudService.UpdateRemoteCache(filePath);
+
                 return true;
             }
             catch

@@ -1,72 +1,79 @@
 @using TheWitcher2SaveEditor.Models
 
-<h5>🔍 Search All Values</h5>
-<p class="text-muted small">Search across all sections for any node by name or value. Useful for finding specific game variables.</p>
+<section class="panel-card">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Search</p>
+            <h3>Find and edit any value</h3>
+        </div>
+    </div>
 
-<div class="input-group mb-3">
-    <input type="text" class="form-control" placeholder="Search for node names (e.g. 'gold', 'orens', 'health', 'level')..."
-           @bind="searchQuery" @bind:event="oninput" @onkeydown="HandleKey" />
-    <button class="btn btn-primary" @onclick="DoSearch">Search</button>
-</div>
+    <div class="input-with-button" style="margin-bottom:14px">
+        <input class="editor-input" placeholder="Search for node names (e.g. gold, orens, health, level)..."
+               @bind="searchQuery" @bind:event="oninput" @onkeydown="HandleKey" />
+        <button class="action-button" @onclick="DoSearch">Search</button>
+    </div>
 
-@if (isSearching)
-{
-    <div class="spinner-border spinner-border-sm" role="status"></div>
-    <span class="ms-2">Searching...</span>
-}
-
-@if (results.Count > 0)
-{
-    <table class="table table-sm table-hover">
-        <thead>
-            <tr>
-                <th>Section</th>
-                <th>Path</th>
-                <th>Type</th>
-                <th>Value</th>
-                <th>Edit</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var r in results.Take(200))
-            {
-                <tr>
-                    <td><span class="badge bg-info">@r.Section</span></td>
-                    <td><code class="small">@r.Path</code></td>
-                    <td><span class="badge bg-secondary">@r.TypeName</span></td>
-                    <td>
-                        @if (editingResult == r)
-                        {
-                            <div class="input-group input-group-sm" style="max-width:200px">
-                                <input type="text" class="form-control" @bind="editValue" @onkeydown="HandleEditKey" />
-                                <button class="btn btn-success btn-sm" @onclick="SaveEdit">✓</button>
-                                <button class="btn btn-secondary btn-sm" @onclick="CancelEdit">✕</button>
-                            </div>
-                        }
-                        else
-                        {
-                            <span class="font-monospace small">@r.DisplayValue</span>
-                        }
-                    </td>
-                    <td>
-                        @if (r.IsEditable && editingResult != r)
-                        {
-                            <button class="btn btn-outline-primary btn-sm py-0 px-1" @onclick="() => StartEdit(r)">✏</button>
-                        }
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    @if (results.Count > 200)
+    @if (isSearching)
     {
-        <p class="text-muted">Showing 200 of @results.Count results. Refine your search.</p>
+        <p class="support-copy"><span class="loading-spinner"></span> Searching...</p>
     }
-}
-else if (hasSearched)
-{
-    <div class="alert alert-secondary">No results found for "@searchQuery".</div>
-}
+
+    @if (results.Count > 0)
+    {
+        <div class="table-shell">
+            <table class="editor-table">
+                <thead>
+                    <tr>
+                        <th>Section</th>
+                        <th>Path</th>
+                        <th>Type</th>
+                        <th>Value</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in results.Take(200))
+                    {
+                        <tr>
+                            <td><span class="badge badge-accent">@r.Section</span></td>
+                            <td class="mono">@r.Path</td>
+                            <td><span class="badge badge-muted">@r.TypeName</span></td>
+                            <td>
+                                @if (editingResult == r)
+                                {
+                                    <div class="input-with-button">
+                                        <input class="editor-input editor-input-mini" @bind="editValue" @onkeydown="HandleEditKey" />
+                                        <button class="mini-button" @onclick="SaveEdit">Apply</button>
+                                        <button class="mini-button" @onclick="CancelEdit">Cancel</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="mono">@r.DisplayValue</span>
+                                }
+                            </td>
+                            <td class="table-actions">
+                                @if (r.IsEditable && editingResult != r)
+                                {
+                                    <button class="mini-button" @onclick="() => StartEdit(r)">Edit</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (results.Count > 200)
+        {
+            <p class="support-copy" style="margin-top:10px">Showing 200 of @results.Count results. Refine your search.</p>
+        }
+    }
+    else if (hasSearched)
+    {
+        <p class="support-copy">No results found for "@searchQuery".</p>
+    }
+</section>
 
 @code {
     [Parameter] public required W2SaveFile Save { get; set; }
@@ -91,11 +98,8 @@ else if (hasSearched)
 
         foreach (var section in Save.Sections.Where(s => s.RootNode != null))
         {
-            // Skip extremely large sections for performance
             if (section.Name == "worldLayerGroups") continue;
-
             SearchNode(section.RootNode!, section.Name, "", query);
-
             if (results.Count >= 500) break;
         }
 

@@ -1,72 +1,72 @@
 @using TheWitcher2SaveEditor.Models
 
-<h5>📜 Quest System</h5>
-<p class="text-muted small">View active quests, quest files, and quest blocks.</p>
-
-@if (quests.Count == 0)
-{
-    <div class="alert alert-info">No quest data found.</div>
-}
-else
-{
-    <div class="mb-3">
-        <input type="text" class="form-control" placeholder="Filter quests..." @bind="filter" @bind:event="oninput" />
+<section class="panel-card">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Quests</p>
+            <h3>Quest system state</h3>
+        </div>
     </div>
 
-    @foreach (var quest in FilteredQuests)
+    @if (quests.Count == 0)
     {
-        <div class="card mb-2">
-            <div class="card-header py-2 d-flex justify-content-between align-items-center" style="cursor:pointer"
-                 @onclick="() => quest.IsExpanded = !quest.IsExpanded">
-                <div>
-                    <span class="me-1">@(quest.IsExpanded ? "▼" : "▶")</span>
-                    <strong>@quest.DisplayName</strong>
-                </div>
-                <span class="badge bg-info">@quest.Blocks.Count blocks</span>
-            </div>
-            @if (quest.IsExpanded)
-            {
-                <div class="card-body py-2">
-                    <p class="text-muted small mb-2">File: <code>@quest.FileName</code></p>
+        <p class="support-copy">No quest data found.</p>
+    }
+    else
+    {
+        <div style="margin-bottom:14px">
+            <input class="editor-input" placeholder="Filter quests..." @bind="filter" @bind:event="oninput" />
+        </div>
 
-                    @if (quest.Threads.Count > 0)
-                    {
+        @foreach (var quest in FilteredQuests)
+        {
+            <div class="quest-card">
+                <div class="quest-card-header" @onclick="() => quest.IsExpanded = !quest.IsExpanded">
+                    <div>
+                        <span style="margin-right:6px">@(quest.IsExpanded ? "v" : ">")</span>
+                        <strong>@quest.DisplayName</strong>
+                    </div>
+                    <span class="badge badge-accent">@quest.Blocks.Count blocks</span>
+                </div>
+                @if (quest.IsExpanded)
+                {
+                    <div class="quest-card-body">
+                        <p class="support-copy" style="margin-bottom:10px">File: <code>@quest.FileName</code></p>
+
                         @foreach (var thread in quest.Threads)
                         {
-                            <div class="mb-2">
-                                <strong class="small">Thread: @thread.Name</strong>
-                                <span class="text-muted small">(Blocks: @thread.NumBlocks)</span>
-                                <table class="table table-sm table-bordered mt-1 mb-0">
-                                    <thead>
-                                        <tr class="small">
-                                            <th>Block</th>
-                                            <th>Status</th>
-                                            <th>GUID</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var block in thread.Blocks)
-                                        {
-                                            <tr class="small">
-                                                <td>@block.Name</td>
-                                                <td>
-                                                    <span class="badge @(block.IsActive ? "bg-success" : "bg-secondary")">
-                                                        @(block.IsActive ? "Active" : "Inactive")
-                                                    </span>
-                                                </td>
-                                                <td class="font-monospace text-muted" style="font-size:0.7rem">@block.Guid</td>
+                            <div style="margin-bottom:10px">
+                                <strong style="font-size:0.88rem">Thread</strong>
+                                <span class="support-copy">(Blocks: @thread.NumBlocks)</span>
+                                <div class="table-shell" style="margin-top:6px">
+                                    <table class="editor-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Block</th>
+                                                <th>Status</th>
+                                                <th>GUID</th>
                                             </tr>
-                                        }
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var block in thread.Blocks)
+                                            {
+                                                <tr>
+                                                    <td>@block.Name</td>
+                                                    <td><span class="badge @(block.IsActive ? "badge-success" : "badge-muted")">@(block.IsActive ? "Active" : "Inactive")</span></td>
+                                                    <td class="mono text-muted">@block.Guid</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         }
-                    }
-                </div>
-            }
-        </div>
+                    </div>
+                }
+            </div>
+        }
     }
-}
+</section>
 
 @code {
     [Parameter] public required W2SaveFile Save { get; set; }
@@ -85,7 +85,6 @@ else
         quests.Clear();
         var section = Save.Sections.FirstOrDefault(s => s.Name == "questSystem");
         if (section?.RootNode == null) return;
-
         ParseQuests(section.RootNode);
     }
 
@@ -102,7 +101,6 @@ else
                 DisplayName = ExtractDisplayName(fileName)
             };
 
-            // Parse threads
             foreach (var threadNode in child.Children.Where(c => c.Name == "questThread" && c.NodeType == "BLCK"))
             {
                 var thread = new QuestThreadVm { Name = "questThread" };
@@ -132,12 +130,10 @@ else
 
     private static string ExtractDisplayName(string fileName)
     {
-        // e.g. "game\0_prologue\00_prologue.w2quest" -> "Prologue"
         var name = Path.GetFileNameWithoutExtension(fileName);
         if (name.Contains('_'))
         {
             var parts = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
-            // Remove numeric prefixes
             var meaningful = parts.Where(p => !int.TryParse(p, out _)).ToArray();
             if (meaningful.Length > 0)
                 return string.Join(" ", meaningful.Select(p => char.ToUpper(p[0]) + p[1..]));

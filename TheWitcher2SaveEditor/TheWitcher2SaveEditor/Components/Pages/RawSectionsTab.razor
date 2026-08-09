@@ -1,37 +1,41 @@
 @using TheWitcher2SaveEditor.Models
 
-<h5>🗂 Raw Section Browser</h5>
-<p class="text-muted small">Browse the raw save file data tree. Expand nodes to explore.</p>
+<section class="panel-card">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Raw Explorer</p>
+            <h3>Inspect and edit raw save fields</h3>
+        </div>
+    </div>
 
-<div class="row">
-    <div class="col-md-3">
-        <div class="list-group" style="max-height: 65vh; overflow-y: auto;">
+    <div class="explorer-grid">
+        <div class="section-list">
             @foreach (var section in Save.Sections)
             {
-                <button class="list-group-item list-group-item-action py-2 @(selectedSection == section ? "active" : "")"
+                <button class="section-item @(selectedSection == section ? "active" : "")"
                         @onclick="() => selectedSection = section">
-                    <small>@section.Name</small>
+                    @section.Name
                 </button>
             }
         </div>
+        <div>
+            @if (selectedSection?.RootNode != null)
+            {
+                <div class="raw-tree">
+                    <RenderNode Node="selectedSection.RootNode" SectionName="@selectedSection.Name" OnEdit="HandleEdit" />
+                </div>
+            }
+            else if (selectedSection != null)
+            {
+                <p class="support-copy">Unable to parse this section.</p>
+            }
+            else
+            {
+                <p class="support-copy">Select a section from the left.</p>
+            }
+        </div>
     </div>
-    <div class="col-md-9">
-        @if (selectedSection?.RootNode != null)
-        {
-            <div style="max-height: 65vh; overflow-y: auto;">
-                <RenderNode Node="selectedSection.RootNode" SectionName="@selectedSection.Name" OnEdit="HandleEdit" />
-            </div>
-        }
-        else if (selectedSection != null)
-        {
-            <p class="text-muted">Unable to parse this section.</p>
-        }
-        else
-        {
-            <p class="text-muted">Select a section from the left.</p>
-        }
-    </div>
-</div>
+</section>
 
 @code {
     [Parameter] public required W2SaveFile Save { get; set; }
@@ -41,11 +45,9 @@
 
     private async Task HandleEdit((string sectionName, string path, string newValue) edit)
     {
-        // Find the node and edit directly in raw data
         var section = Save.Sections.FirstOrDefault(s => s.Name == edit.sectionName);
         if (section?.RootNode == null) return;
 
-        // Simple approach: search for node by name in the section
         SaveNode? found = null;
         void Find(SaveNode n) {
             if (n.Name == edit.path && n.Value != null) { found = n; return; }

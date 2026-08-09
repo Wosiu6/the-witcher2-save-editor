@@ -1,64 +1,72 @@
 @using TheWitcher2SaveEditor.Models
 @using TheWitcher2SaveEditor.Services
 
-<h5>🎒 Player Inventory</h5>
-<p class="text-muted small">Edit item quantities, or change equipped items. The first entity with a large inventory is Geralt's.</p>
-
-@if (inventoryItems.Count == 0)
-{
-    <div class="alert alert-info">No inventory data found in this save file.</div>
-}
-else
-{
-    <div class="mb-3">
-        <input type="text" class="form-control" placeholder="Filter items..." @bind="filter" @bind:event="oninput" />
+<section class="panel-card">
+    <div class="panel-header">
+        <div>
+            <p class="panel-kicker">Inventory</p>
+            <h3>Manage carried items</h3>
+        </div>
     </div>
 
-    <table class="table table-sm table-hover">
-        <thead>
-            <tr>
-                <th>Item Name</th>
-                <th style="width:100px">Qty</th>
-                <th style="width:80px">Flags</th>
-                <th style="width:60px">Edit</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var item in FilteredItems)
-            {
-                <tr>
-                    <td>
-                        <span class="@GetItemClass(item)">@item.Name</span>
-                    </td>
-                    <td>
-                        @if (editingItem == item)
-                        {
-                            <input type="number" class="form-control form-control-sm" style="width:80px"
-                                   @bind="editQty" @onkeydown="HandleKey" />
-                        }
-                        else
-                        {
-                            @item.Quantity
-                        }
-                    </td>
-                    <td><span class="badge bg-secondary">@item.Flags</span></td>
-                    <td>
-                        @if (editingItem == item)
-                        {
-                            <button class="btn btn-success btn-sm py-0 px-1" @onclick="SaveEdit">✓</button>
-                            <button class="btn btn-secondary btn-sm py-0 px-1" @onclick="CancelEdit">✕</button>
-                        }
-                        else
-                        {
-                            <button class="btn btn-outline-primary btn-sm py-0 px-1" @onclick="() => StartEdit(item)">✏</button>
-                        }
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <p class="text-muted small">Showing @FilteredItems.Count() of @inventoryItems.Count items. Flags: equipped items have flag values ≥ 16.</p>
-}
+    @if (inventoryItems.Count == 0)
+    {
+        <p class="support-copy">No inventory data found in this save file.</p>
+    }
+    else
+    {
+        <div class="inline-form" style="margin-bottom:14px">
+            <input class="editor-input" placeholder="Filter items..." @bind="filter" @bind:event="oninput" />
+        </div>
+
+        <div class="table-shell">
+            <table class="editor-table">
+                <thead>
+                    <tr>
+                        <th>Item Name</th>
+                        <th>Qty</th>
+                        <th>Flags</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in FilteredItems)
+                    {
+                        <tr>
+                            <td>
+                                <span class="@(item.Flags >= 16 ? "item-equipped" : "")">@item.Name</span>
+                            </td>
+                            <td>
+                                @if (editingItem == item)
+                                {
+                                    <input class="editor-input editor-input-mini" type="number"
+                                           @bind="editQty" @onkeydown="HandleKey" />
+                                }
+                                else
+                                {
+                                    @item.Quantity
+                                }
+                            </td>
+                            <td><span class="badge badge-muted">@item.Flags</span></td>
+                            <td class="table-actions">
+                                @if (editingItem == item)
+                                {
+                                    <button class="mini-button" @onclick="SaveEdit">Apply</button>
+                                    <button class="mini-button" @onclick="CancelEdit">Cancel</button>
+                                }
+                                else
+                                {
+                                    <button class="mini-button" @onclick="() => StartEdit(item)">Edit</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="support-copy" style="margin-top:10px">Showing @FilteredItems.Count() of @inventoryItems.Count items. Equipped items (flags >= 16) are highlighted.</p>
+    }
+</section>
 
 @code {
     [Parameter] public required W2SaveFile Save { get; set; }
@@ -79,7 +87,6 @@ else
         inventoryItems.Clear();
         var section = Save.Sections.FirstOrDefault(s => s.Name == "dynamicEntities");
         if (section?.RootNode == null) return;
-
         FindInventories(section.RootNode, true);
     }
 
@@ -90,7 +97,6 @@ else
             var itemCountNode = node.Children.FirstOrDefault(c => c.Name == "itemCount");
             var count = itemCountNode?.Value?.Value as uint? ?? 0;
 
-            // Player inventory is the largest one
             if (!playerOnly || count >= 10)
             {
                 foreach (var item in node.Children.Where(c => c.Name == "item"))
@@ -111,7 +117,6 @@ else
                         });
                     }
                 }
-
                 if (playerOnly && inventoryItems.Count > 0) return;
             }
         }
@@ -138,7 +143,6 @@ else
 
         if (oldBytes.Length == newBytes.Length)
         {
-            // Direct replacement in raw data
             var data = Save.RawDecompressedData;
             var section = editingItem.Section;
             int nextOffset = Save.Sections.Where(s => s.Offset > section.Offset).Select(s => s.Offset).DefaultIfEmpty(data.Length).Min();
@@ -172,8 +176,6 @@ else
         if (e.Key == "Enter") await SaveEdit();
         if (e.Key == "Escape") CancelEdit();
     }
-
-    private static string GetItemClass(InventoryItemVm item) => item.Flags >= 16 ? "fw-bold text-success" : "";
 
     private class InventoryItemVm
     {
